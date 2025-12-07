@@ -1,17 +1,12 @@
 from rest_framework.views import APIView
 from rest_framework.response import Response
 from rest_framework import status
-from rest_framework.exceptions import NotFound
+from rest_framework.exceptions import NotFound, ValidationError, APIException
 from drf_yasg.utils import swagger_auto_schema
-from drf_yasg import openapi
-from rest_framework.exceptions import ValidationError
-
-
+import traceback
 from .models import Clinic, Department, Equipments
 from .serializers import ClinicSerializer, ClinicReadSerializer, EquipmentSerializer
 import logging
-from rest_framework.exceptions import NotFound, APIException
-import traceback
 
 logger = logging.getLogger(__name__)
 
@@ -31,11 +26,25 @@ class ClinicCreateAPIView(APIView):
         }
     )
     def post(self, request):
-        serializer = ClinicSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
 
-        clinic = serializer.save()
-        return Response(ClinicSerializer(clinic).data, status=status.HTTP_201_CREATED)
+        try:
+            serializer = ClinicSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+
+            clinic = serializer.save()
+
+            return Response(
+                ClinicSerializer(clinic).data,
+                status=status.HTTP_201_CREATED
+            )
+
+        except ValidationError as ve:
+            return Response({"error": ve.detail}, status=400)
+
+        except Exception as e:
+            logger.exception(f"Unhandled Clinic Create Error: {e}")
+            return Response({"error": "Internal Server Error"}, status=500)
+
 
 
 # -------------------------------------------------------------------
@@ -54,16 +63,30 @@ class ClinicUpdateAPIView(APIView):
         }
     )
     def put(self, request, clinic_id):
+
         try:
             clinic = Clinic.objects.get(id=clinic_id)
+
+            serializer = ClinicSerializer(clinic, data=request.data)
+            serializer.is_valid(raise_exception=True)
+
+            updated = serializer.save()
+
+            return Response(
+                ClinicSerializer(updated).data,
+                status=status.HTTP_200_OK
+            )
+
         except Clinic.DoesNotExist:
             raise NotFound("Clinic not found")
 
-        serializer = ClinicSerializer(clinic, data=request.data)
-        serializer.is_valid(raise_exception=True)
+        except ValidationError as ve:
+            return Response({"error": ve.detail}, status=400)
 
-        updated = serializer.save()
-        return Response(ClinicSerializer(updated).data, status=status.HTTP_200_OK)
+        except Exception as e:
+            logger.exception(f"Unhandled Clinic Update Error: {e}")
+            return Response({"error": "Internal Server Error"}, status=500)
+
 
 
 # -------------------------------------------------------------------
@@ -80,13 +103,20 @@ class GetClinicView(APIView):
         }
     )
     def get(self, request, clinic_id):
+
         try:
             clinic = Clinic.objects.get(id=clinic_id)
+
+            serializer = ClinicReadSerializer(clinic)
+            return Response(serializer.data, status=status.HTTP_200_OK)
+
         except Clinic.DoesNotExist:
             raise NotFound("Clinic not found")
 
-        serializer = ClinicReadSerializer(clinic)
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        except Exception as e:
+            logger.exception(f"Unhandled Clinic Fetch Error: {e}")
+            return Response({"error": "Internal Server Error"}, status=500)
+
 
 
 # -------------------------------------------------------------------
@@ -106,19 +136,34 @@ class DepartmentEquipmentCreateAPIView(APIView):
     )
     def post(self, request, department_id):
 
-        # Validate Department ID
         try:
             department = Department.objects.get(id=department_id)
+
+            serializer = EquipmentSerializer(data=request.data)
+            serializer.is_valid(raise_exception=True)
+
+            equipment = serializer.save(dep=department)
+
+            return Response(
+                EquipmentSerializer(equipment).data,
+                status=status.HTTP_201_CREATED
+            )
+
         except Department.DoesNotExist:
             raise NotFound("Department not found")
 
-        serializer = EquipmentSerializer(data=request.data)
-        serializer.is_valid(raise_exception=True)
+        except ValidationError as ve:
+            return Response({"error": ve.detail}, status=400)
 
-        equipment = serializer.save(dep=department)
-        return Response(EquipmentSerializer(equipment).data, status=status.HTTP_201_CREATED)
+        except Exception as e:
+            logger.exception(f"Unhandled Equipment Create Error: {e}")
+            return Response({"error": "Internal Server Error"}, status=500)
 
-    
+
+
+# -------------------------------------------------------------------
+#  5. Update Equipment under Department (PUT)
+# -------------------------------------------------------------------
 class DepartmentEquipmentUpdateAPIView(APIView):
 
     @swagger_auto_schema(
@@ -133,24 +178,46 @@ class DepartmentEquipmentUpdateAPIView(APIView):
     )
     def put(self, request, department_id, equipment_id):
 
-        # Check if department exists
         try:
-            Department.objects.get(id=department_id)
-        except Department.DoesNotExist:
-            raise NotFound("Department not found")
+            logger.info(f"PUT Request Received - dep_id={department_id}, eq_id={equipment_id}")
 
-        # Check if equipment belongs to this department
-        equipment = Equipments.objects.filter(
-            id=equipment_id, 
-            dep_id=department_id
-        ).first()
+            # 1) Check department
+            try:
+                department = Department.objects.get(id=department_id)
+                logger.info("Department found")
+            except Department.DoesNotExist:
+                logger.warning("Department NOT found")
+                raise NotFound("Department not found")
 
-        if not equipment:
-            raise NotFound("Equipment not found under this department")
+            # 2) Check equipment under department
+            equipment = Equipments.objects.filter(id=equipment_id, dep_id=department_id).first()
+            if not equipment:
+                logger.warning("Equipment NOT found under department")
+                raise NotFound("Equipment not found under this department")
 
-        #  Validate and update equipment
-        serializer = EquipmentSerializer(equipment, data=request.data)
-        serializer.is_valid(raise_exception=True)
-        serializer.save()
+            logger.info("Equipment found under department, validating serializer...")
 
-        return Response(serializer.data, status=status.HTTP_200_OK)
+            # 3) Validate request data
+            serializer = EquipmentSerializer(equipment, data=request.data)
+            serializer.is_valid(raise_exception=True)
+
+            logger.info("Serializer valid, saving...")
+
+            updated_equipment = serializer.save()
+
+            logger.info("Save success")
+
+            return Response(EquipmentSerializer(updated_equipment).data, status=200)
+
+        except ValidationError as ve:
+            logger.error(f"ValidationError: {ve.detail}")
+            return Response({"error": ve.detail}, status=400)
+
+        except NotFound as nf:
+            logger.warning(str(nf))
+            raise nf  
+
+        except Exception as e:
+            logger.error("Unhandled Exception during update:\n" + traceback.format_exc())
+            return Response({"error": "Internal Server Error"}, status=500)
+
