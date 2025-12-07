@@ -1,9 +1,0 @@
-[ERROR] 2025-12-06 19:29:17 restapi.exception_handler:30 — [ERROR][2025-12-06 13:59:17.860646][ReqID: c22d55d92d85][IP: 127.0.0.1]
-Path: /api/get_clinic/30/
-Error: Clinic not found
-[ERROR] 2025-12-07 20:48:56 restapi.exception_handler:30 — [ERROR][2025-12-07 15:18:56.402624][ReqID: d5bcc5e57e3f][IP: 127.0.0.1]
-Path: /api/departments/31/equipments/
-Error: Department not found
-[ERROR] 2025-12-07 20:50:56 restapi.exception_handler:30 — [ERROR][2025-12-07 15:20:56.668530][ReqID: afe12c67de4f][IP: 127.0.0.1]
-Path: /api/departments/32/equipments/
-Error: Department not found
